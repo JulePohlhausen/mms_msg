@@ -84,16 +84,21 @@ def get_transcription(segments, database_path, sub_dict):
 
     return transcription
 
-def get_transcription_vctk(database_path):
+def get_transcription_vpc(database_path, set='vctk'):
     transcription = defaultdict(dict)
-    filepaths = {database_path  / 'vctk_dev' / 'text.txt',
-                database_path  / 'vctk_test' / 'text.txt'}
+    filepaths = {database_path  / (set + '_dev') / 'text',
+                database_path  / (set + '_test') / 'text'}
     
+    if set == 'vctk':
+        end_idx = 13
+    else:
+        end_idx = 16
+
     for filepath in filepaths:
         with open(filepath, 'r') as f:
             for line in f.readlines():
-                wav_id = line[:13]
-                text = line[14:-2]
+                wav_id = line[:end_idx]
+                text = line[(end_idx+1):].replace('\n', '')
                 transcription[wav_id] = text
 
     return transcription
@@ -111,14 +116,14 @@ def get_audio_files_vctk(sub_dict, database_path, identifier):
     for segment, sub_dict in sub_dict.items():
         subset, speaker_id = segment.split('|')
         file_path = database_path / subset / speaker_id
-        subset_id = subset.strip().replace('-', '_')
+        subset_id = subset.strip()
         for x in file_path.glob(f'*.{identifier}'):
             yield x, sub_dict, subset_id            
 
 def read_subset(database_path, sub_dict, wav):
     database = dict()
     examples = defaultdict(dict)
-    transcription = get_transcription(sub_dict.keys(), database_path, sub_dict)
+    transcription = get_transcription_vpc(database_path, set='libri')
     identifier = 'wav' if wav else 'flac'
     audio_files = get_audio_files(sub_dict, database_path, identifier)
     with ThreadPoolExecutor(os.cpu_count()) as ex:
@@ -135,7 +140,7 @@ def read_subset(database_path, sub_dict, wav):
     return database
 
 def read_subset_vctk(database_path, sub_dict, wav, database):
-    transcription = get_transcription_vctk(database_path)
+    transcription = get_transcription_vpc(database_path, set='vctk')
     identifier = 'wav' if wav else 'flac'
     audio_files = get_audio_files_vctk(sub_dict, database_path, identifier)
     with ThreadPoolExecutor(os.cpu_count()) as ex:
