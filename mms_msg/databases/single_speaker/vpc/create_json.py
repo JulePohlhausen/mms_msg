@@ -26,13 +26,10 @@ def read_speakers(filepath):
 def read_speakers_vctk(filepath):
     sub_dict = defaultdict(dict)
     for line in filepath.read_text().splitlines():
-        if line.startswith('ID'):
-            continue
-        splitted = line.split(' | ')
-        speaker_id = splitted[0].strip()
-        gender = splitted[2].strip()
-        sub_dict[speaker_id]['gender'] = \
-            'male' if gender == 'M' else 'female'
+        speaker_id, gender, subset = [
+            segment.strip() for segment in line.split(' ')]
+        sub_dict[subset + '|' + speaker_id]['gender'] = \
+            'male' if gender == 'm' else 'female'
 
     return sub_dict
 
@@ -112,8 +109,8 @@ def get_audio_files(sub_dict, database_path, identifier):
 
 def get_audio_files_vctk(sub_dict, database_path, identifier):
     for segment, sub_dict in sub_dict.items():
-        subset, speaker_id, chapter_id = segment.split('|')
-        file_path = database_path / subset / speaker_id / chapter_id
+        subset, speaker_id = segment.split('|')
+        file_path = database_path / subset / speaker_id
         subset_id = subset.strip().replace('-', '_')
         for x in file_path.glob(f'*.{identifier}'):
             yield x, sub_dict, subset_id            
@@ -157,7 +154,7 @@ def create_json(database_path, wav):
     database = read_subset(database_path, sub_dict_chapters, wav)
 
     # data from vctk
-    sub_dict = read_speakers_vctk(database_path / 'vctk_dev' / 'speaker-info.txt')
+    sub_dict = read_speakers_vctk(database_path / 'vctk_dev' / 'SPEAKERS.txt')
     database = read_subset_vctk(database_path, sub_dict, wav, database)
     return database
 
