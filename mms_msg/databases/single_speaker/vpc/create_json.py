@@ -28,9 +28,10 @@ def read_speakers_vctk(filepath):
     for line in filepath.read_text().splitlines():
         if line.startswith('ID'):
             continue
-        speaker_id, gender, subset, _, _ = [
-            segment.strip() for segment in line.split(' | ')]
-        sub_dict[subset + '|' + speaker_id]['gender'] = \
+        splitted = line.split(' | ')
+        speaker_id = splitted[0].strip()
+        gender = splitted[2].strip()
+        sub_dict[speaker_id]['gender'] = \
             'male' if gender == 'M' else 'female'
 
     return sub_dict
@@ -86,6 +87,20 @@ def get_transcription(segments, database_path, sub_dict):
 
     return transcription
 
+def get_transcription_vctk(database_path):
+    transcription = defaultdict(dict)
+    filepaths = {database_path  / 'vctk_dev' / 'text.txt',
+                database_path  / 'vctk_test' / 'text.txt'}
+    
+    for filepath in filepaths:
+        with open(filepath, 'r') as f:
+            for line in f.readlines():
+                wav_id = line[:13]
+                text = line[14:-2]
+                transcription[wav_id] = text
+
+    return transcription
+
 
 def get_audio_files(sub_dict, database_path, identifier):
     for segment, sub_dict in sub_dict.items():
@@ -95,6 +110,13 @@ def get_audio_files(sub_dict, database_path, identifier):
         for x in file_path.glob(f'*.{identifier}'):
             yield x, sub_dict, subset_id
 
+def get_audio_files_vctk(sub_dict, database_path, identifier):
+    for segment, sub_dict in sub_dict.items():
+        subset, speaker_id, chapter_id = segment.split('|')
+        file_path = database_path / subset / speaker_id / chapter_id
+        subset_id = subset.strip().replace('-', '_')
+        for x in file_path.glob(f'*.{identifier}'):
+            yield x, sub_dict, subset_id            
 
 def read_subset(database_path, sub_dict, wav):
     database = dict()
@@ -115,6 +137,18 @@ def read_subset(database_path, sub_dict, wav):
         'train_460': ['train_clean_100', 'train_clean_360']}
     return database
 
+def read_subset_vctk(database_path, sub_dict, wav, database):
+    transcription = get_transcription_vctk(database_path)
+    identifier = 'wav' if wav else 'flac'
+    audio_files = get_audio_files_vctk(sub_dict, database_path, identifier)
+    with ThreadPoolExecutor(os.cpu_count()) as ex:
+        for subset_id, example_id, example_dict in ex.map(
+                partial(get_example_dict, transcription=transcription),
+                audio_files
+        ):
+            database['datasets'][subset_id][example_id] = example_dict
+
+    return database
 
 def create_json(database_path, wav):
     # data from librispeech 
@@ -124,8 +158,7 @@ def create_json(database_path, wav):
 
     # data from vctk
     sub_dict = read_speakers_vctk(database_path / 'vctk_dev' / 'speaker-info.txt')
-    sub_dict_chapters = read_chapters(database_path / 'libri_dev' / 'CHAPTERS.TXT', sub_dict)
-    database = read_subset(database_path, sub_dict_chapters, wav)
+    database = read_subset_vctk(database_path, sub_dict, wav, database)
     return database
 
 
