@@ -34,4 +34,4 @@ def plot_mixture(ex, sample_rate=None, ax=None):
     ax.axvline(ex['num_samples']['observation'])
     if sample_rate is not None:
         ax.set_xticks(ax.get_xticks())
-        ax.set_xticklabels(ax.get_xticks() / sample_rate)
+        #ax.set_xticklabels(ax.get_xticks() / sample_rate)
