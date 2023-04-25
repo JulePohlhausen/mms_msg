@@ -296,6 +296,21 @@ class MySamplingModule:
 
 A more practical example is given [in this notebook](notebooks/extending_mms_msg.ipynb).
 
+
+## Installation and setup [JP]
+```
+pip install --editable .
+```
+
+For the notebooks you need additionally:
+
+```
+pip install ipywidgets seaborn
+```
+
+Maybe you have to change np.int to np.int32 in the site-package paderbox at visualization/plot.py.
+
+
 ## Cite
 MMS-MSG was proposed in the following publication:
 ```bibtex
