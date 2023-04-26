@@ -3,6 +3,7 @@ Script to save VPC meetings to disk
 25.04.2023 JP
 '''
 import mms_msg
+import paderbox as pb
 import soundfile as sf
 import os
 from pathlib import Path
@@ -28,3 +29,6 @@ for sub_set in dataset_names:
         filename = os.path.join(data_path, sub_set, ex['example_id'] + '.wav')
         sf.write(filename, ex['audio_data']['observation'], sample_rate)
 print('Done!')
+
+database_dict = {'datasets': {dataset_name: dict(db.get_dataset(dataset_name).items(), desc=dataset_name) for dataset_name in dataset_names}}
+pb.io.dump(database_dict, os.path.join(data_path, 'vpc_mix.json'))

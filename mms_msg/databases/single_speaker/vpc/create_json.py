@@ -3,6 +3,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
+import numpy as np
 
 import click
 
@@ -46,13 +47,14 @@ def read_speakers_vctk(filepath):
     return sub_dict
 
 
-def get_example_dict(in_tuple, transcription):
+def get_example_dict(in_tuple, transcription, vad_info):
     audio_file, sub_dict, subset_id = in_tuple
     audio_id = audio_file.stem
 
     example_dict = {
         'audio_path': {"observation": str(audio_file)},
         'transcription': transcription[audio_id],
+        'vad_info': vad_info[audio_id],
         'num_samples': audio_length(str(audio_file), unit='samples'),
     }
 
@@ -74,6 +76,24 @@ def get_transcription(database_path, set='vctk'):
     return transcription
 
 
+def get_vad_info(database_path, set='vctk', sample_rate=16000):
+    vad_info = defaultdict(dict)
+    filepaths = {database_path  / (set + '_dev') / 'vad_info.txt',
+                database_path  / (set + '_test') / 'vad_info.txt'}
+
+    for filepath in filepaths:
+        with open(filepath, 'r') as f:
+            for line in f.readlines():
+                wav_id, seg, start, end, vad = line.replace('\n', '').split('  ')
+                wav_id = wav_id.split('.')[0]
+                if vad == 'SPEECH':
+                    vad_info[wav_id][seg] = {
+                        'start': int(np.floor(float(start)*sample_rate)),
+                        'end': int(np.ceil(float(end)*sample_rate)),
+                    }
+    return vad_info
+
+
 def get_audio_files(sub_dict, database_path, identifier):
     for segment, sub_dict in sub_dict.items():
         subset, speaker_id = segment.split('|')
@@ -87,16 +107,17 @@ def read_subset(database_path, sub_dict_libri, sub_dict_vctk, wav):
     database = dict()
     examples = defaultdict(dict)
     identifier = 'wav' if wav else 'flac'
-    subsets = {'libri', 'vctk'}
+    subsets = {'libri'}#, 'vctk'}
     for subset in subsets:
         transcription = get_transcription(database_path, set=subset)
+        vad_info = get_vad_info(database_path, set=subset)
         if subset == 'libri':
             audio_files = get_audio_files(sub_dict_libri, database_path, identifier)
         else:
             audio_files = get_audio_files(sub_dict_vctk, database_path, identifier)
         with ThreadPoolExecutor(os.cpu_count()) as ex:
             for subset_id, example_id, example_dict in ex.map(
-                    partial(get_example_dict, transcription=transcription),
+                    partial(get_example_dict, transcription=transcription, vad_info=vad_info),
                     audio_files
             ):
                 examples[subset_id][example_id] = example_dict
