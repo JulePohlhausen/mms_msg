@@ -110,6 +110,9 @@ class UniformOverlapSampler(OverlapSampler):
         elif maximum_overlap <= self.soft_minimum_overlap:
             # Return maximum possible overlap in this case
             shift = -maximum_overlap + self.margin
+        elif self.maximum_silence == 1:
+            # Return no silence
+            shift = self.maximum_silence + self.margin
         else:
             for _ in range(100):    # Arbitrary upper bound for num rejections
                 shift = self._sample_shift(rng)
