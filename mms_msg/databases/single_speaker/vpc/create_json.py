@@ -47,14 +47,13 @@ def read_speakers_vctk(filepath):
     return sub_dict
 
 
-def get_example_dict(in_tuple, transcription, vad_info):
+def get_example_dict(in_tuple, transcription):
     audio_file, sub_dict, subset_id = in_tuple
     audio_id = audio_file.stem
 
     example_dict = {
         'audio_path': {"observation": str(audio_file)},
         'transcription': transcription[audio_id],
-        'vad_info': vad_info[audio_id],
         'num_samples': audio_length(str(audio_file), unit='samples'),
     }
 
@@ -94,30 +93,30 @@ def get_vad_info(database_path, set='vctk', sample_rate=16000):
     return vad_info
 
 
-def get_audio_files(sub_dict, database_path, identifier):
+def get_audio_files(sub_dict, database_path, identifier, audiofolder):
     for segment, sub_dict in sub_dict.items():
         subset, speaker_id = segment.split('|')
-        file_path = database_path / subset / 'wav' / speaker_id
+        file_path = database_path / subset / audiofolder / speaker_id
         subset_id = subset.strip()
         for x in file_path.glob(f'*.{identifier}'):
             yield x, sub_dict, subset_id            
 
 
-def read_subset(database_path, sub_dict_libri, sub_dict_vctk, wav):
+def read_subset(database_path, sub_dict_libri, sub_dict_vctk, wav, audiofolder):
     database = dict()
     examples = defaultdict(dict)
     identifier = 'wav' if wav else 'flac'
-    subsets = {'libri'}#, 'vctk'}
+    subsets = {'libri', 'vctk'}
     for subset in subsets:
         transcription = get_transcription(database_path, set=subset)
-        vad_info = get_vad_info(database_path, set=subset)
+        #vad_info = get_vad_info(database_path, set=subset)
         if subset == 'libri':
-            audio_files = get_audio_files(sub_dict_libri, database_path, identifier)
+            audio_files = get_audio_files(sub_dict_libri, database_path, identifier, audiofolder)
         else:
-            audio_files = get_audio_files(sub_dict_vctk, database_path, identifier)
+            audio_files = get_audio_files(sub_dict_vctk, database_path, identifier, audiofolder)
         with ThreadPoolExecutor(os.cpu_count()) as ex:
             for subset_id, example_id, example_dict in ex.map(
-                    partial(get_example_dict, transcription=transcription, vad_info=vad_info),
+                    partial(get_example_dict, transcription=transcription),
                     audio_files
             ):
                 examples[subset_id][example_id] = example_dict
@@ -125,13 +124,13 @@ def read_subset(database_path, sub_dict_libri, sub_dict_vctk, wav):
         database['datasets'] = examples
     return database
 
-def create_json(database_path, wav):
+def create_json(database_path, wav, audiofolder):
     # data from librispeech 
     sub_dict_libri = read_speakers_libri(database_path)
 
     # data from vctk
     sub_dict_vctk = read_speakers_vctk(database_path / 'vctk_dev' / 'SPEAKERS.txt')
-    database = read_subset(database_path, sub_dict_libri, sub_dict_vctk, wav)
+    database = read_subset(database_path, sub_dict_libri, sub_dict_vctk, wav, audiofolder)
     return database
 
 
@@ -151,9 +150,13 @@ def create_json(database_path, wav):
          'otherwise only flac files are used',
     is_flag=True
 )
+@click.option(
+    '--audio-folder', '-a', default='wav',
+    help='Defines whether to look for wav folder or e.g. wav_cutted',
+)
 
-def main(json_path, database_path, wav):
-    database = create_json(Path(database_path).absolute(), wav)
+def main(json_path, database_path, wav, audio_folder):
+    database = create_json(Path(database_path).absolute(), wav, audio_folder)
     print('Check that all wav files in the json exists.')
     check_audio_files_exist(database, speedup='thread')
     print('Finished check. Write json to disk:')
