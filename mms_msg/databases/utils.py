@@ -4,13 +4,6 @@ import paderbox as pb
 
 def get_dataset_name_and_rng(dataset_name):
     if 'rng' in dataset_name:
-        if 'test' in dataset_name:
-            raise ValueError(
-                f'Dynamic mixing should not be activated on test '
-                f'datasets to ensure reproducibility (i.e., no "rng" '
-                f'in the dataset name: {dataset_name})'
-            )
-
         try:
             dataset_name, seed = dataset_name.split('_rng')
         except ValueError:
