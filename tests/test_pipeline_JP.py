@@ -74,7 +74,7 @@ for sub_set in dataset_names:
             # check stopping criterion
             if len(set(speakers)) == max_speakers and len(set(utterances)) >= min_coverage:
                 print(f"reached 100% speaker and {utt_coverage*100}% utterance coverage")
-                ex = islice(dset.items(), idx)
+                ex = islice(dset.items(), idx+1)
                 examples[sub_set] = dict(ex)
                 break
 
