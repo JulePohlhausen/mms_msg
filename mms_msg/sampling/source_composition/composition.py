@@ -9,6 +9,7 @@ from mms_msg.sampling.utils import cache_and_normalize_input_dataset, collate_fn
 from mms_msg.sampling.utils.rng import get_rng, derive_rng
 from lazy_dataset import Dataset
 import numpy as np
+import random
 import logging
 
 logger = logging.getLogger('composition')
@@ -31,6 +32,49 @@ def sample_utterance_composition(input_dataset, rng, num_speakers):
         composition = extend_composition_example_greedy(
             rng, speaker_ids, example_compositions=composition,
         )
+    logger.debug(f'Generated {len(composition)} speaker '
+                 f'compositions')
+
+    return composition
+
+def sample_utterance_unique_composition(input_dataset, rng, num_speakers=(3,4)):
+    """
+    Samples a "default" utterance composition with 3-4 unique speakers.
+
+    Generates 10 meeetings with each speaker in the `input_dataset`.
+    Spezialized for VPC test data.
+    """
+    speaker_ids = [example['speaker_id'] for example in input_dataset]
+    unique_speaker_ids = list(set(speaker_ids))
+
+    max_speakers = len(unique_speaker_ids)
+
+    # split libri_dev and libri_test with each 40 speakers in total to 
+    # 8 meetings with 3 speakers and 4 meetings with 4 speakers, 
+    # and vctk_dev and vctk_test with each 30 speakers in total to 
+    # 6 meetings with 3 speakers and 3 meetings with 4 speakers
+    if max_speakers == 40:
+        speakers_per_composition = num_speakers[0] * np.ones(10, dtype=int) 
+        speakers_per_composition[:4] = num_speakers[1]
+    elif max_speakers == 30:
+        speakers_per_composition = num_speakers[0] * np.ones(10, dtype=int)
+        speakers_per_composition[:3] = num_speakers[1]
+    else:
+        raise KeyError(f'No settings defined for maximum of speakers {max_speakers}') from None
+
+    # Generate list of spekears per meeting
+    composition = []
+    for speakers in speakers_per_composition:
+        current = random.sample(unique_speaker_ids, k=speakers)
+        candidates = None
+        for c in current:
+            idx_c = np.array([i for i, s in enumerate(speaker_ids) if s == c])
+            if candidates is None:
+                candidates = idx_c[:, None]
+            else:
+                candidates = np.concatenate([candidates, idx_c[:, None]], axis=0)
+            unique_speaker_ids.remove(c)
+        composition.append(candidates)
     logger.debug(f'Generated {len(composition)} speaker '
                  f'compositions')
 
@@ -304,6 +348,69 @@ def get_composition(
     )
     return composition
 
+def get_unique_composition(
+        input_dataset: Iterable,
+        num_speakers: Union[int, Tuple[int, ...]],
+        composition_sampler=sample_utterance_unique_composition,
+        rng: Union[int, bool] = False,
+) -> dict:
+    """
+    Build a composition as a `dict` from examples in `input_dataset`.
+
+    Note:
+        Use the function `get_composition_dataset` if you use `lazy_dataset`.
+        The `get_composition` function does not support dynamic mixing because
+        it cannot return dynamix mixtures as a dict.
+
+    Args:
+        input_dataset: The dataset to draw examples from
+        num_speakers: The number of speakers. It can either be an int or a
+            tuple of ints, in which case the number of speakers is randomly
+            drawn from that list for each example.
+            As an example, `num_speakers=(1, 2, 2, 3)` would generate
+            1-spk and 3-spk compositions with a probability of 0.25 each and
+            2-spk compositions with a probability of 0.5.
+        composition_sampler: The composition sampling algorithm.
+            See `sample_utterance_composition`,
+            `sample_reduced_utterance_composition`
+            and `sample_low_resource_utterance_composition`
+        rng: Either an `int` or `False`. If it is an int, it is used as a
+            seed for generating the composition. `True` is only supported by
+            `get_composition_dataset`.
+    """
+    input_dataset = cache_and_normalize_input_dataset(input_dataset)
+
+    # Infer name from dataset. Make sure that all examples come
+    # from the same dataset (otherwise the dataset name is not unique)
+    name = input_dataset[0]['dataset']
+    assert all([x['dataset'] == name for x in input_dataset])
+
+    # Construct a name and rng from the `rng` parameter
+    if rng is True:
+        raise ValueError(
+            f'rng=True only works with get_composition_dataset, '
+            f'not with get_composition'
+        )
+    elif rng is False:
+        pass
+    elif isinstance(rng, int):
+        name += f'_rng{rng}'
+    else:
+        raise TypeError(rng)
+    rng = get_rng('composition', name)
+
+    # Sample the composition
+    composition = composition_sampler(
+        input_dataset=input_dataset, rng=rng,
+        num_speakers=num_speakers
+    )
+
+    # Convert the composition to the correct format
+    composition = _composition_list_to_dict(
+        composition, input_dataset, name
+    )
+    return composition
+
 
 def get_composition_dataset(
         input_dataset: Iterable,
@@ -341,12 +448,20 @@ def get_composition_dataset(
             cache_and_normalize_input_dataset(input_dataset),
             num_speakers,
         )
-    composition = get_composition(
-        input_dataset=input_dataset,
-        num_speakers=num_speakers,
-        composition_sampler=composition_sampler,
-        rng=rng,
-    )
+    
+    if hasattr(composition_sampler, '__call__'):
+        composition = get_composition(
+            input_dataset=input_dataset,
+            num_speakers=num_speakers,
+            composition_sampler=composition_sampler,
+            rng=rng,
+        )
+    elif isinstance(composition_sampler, str):
+         composition = get_unique_composition(
+            input_dataset=input_dataset,
+            num_speakers=num_speakers,
+            rng=rng,
+        )       
     name = next(iter(composition.values()))['dataset']
     return lazy_dataset.new(composition, name=name)
 
