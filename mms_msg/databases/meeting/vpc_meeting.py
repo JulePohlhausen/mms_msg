@@ -4,6 +4,7 @@ from mms_msg.sampling.environment.scaling import UniformScalingSampler
 from mms_msg.sampling.pattern.meeting import MeetingSampler
 from mms_msg.sampling.pattern.meeting.overlap_sampler import UniformOverlapSampler
 from mms_msg.sampling.environment.noise import UniformSNRSampler
+from mms_msg.sampling.source_composition import sample_utterance_composition
 from mms_msg.databases.single_speaker.vpc import VPC
 from .database import AnechoicMeetingDatabase
 
@@ -64,9 +65,12 @@ def AnechoicVPCMeeting(source_json_path=database_jsons / 'vpc.json',
     meeting_sampler = MeetingSampler(duration, overlap_sampler=overlap_sampler)
     snr_sampler = UniformSNRSampler(snr_min_max[0], snr_min_max[1])
     scaling_sampler = UniformScalingSampler(max_weight=max_weight)
+    composition_sampler = 'unique'
+    #composition_sampler = sample_utterance_composition
     return AnechoicMeetingDatabase(source_database=source_database,
                                    num_speakers=num_speakers,
                                    meeting_sampler=meeting_sampler,
                                    scaling_sampler=scaling_sampler,
                                    snr_sampler=snr_sampler,
+                                   composition_sampler=composition_sampler,
                                    )
