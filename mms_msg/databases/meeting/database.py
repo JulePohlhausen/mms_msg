@@ -2,7 +2,7 @@ from lazy_dataset.database import JsonDatabase
 from mms_msg import keys
 from mms_msg.databases.database import MMSMSGDatabase
 from mms_msg.sampling.environment.rir import RIRSampler
-from mms_msg.sampling.source_composition import get_composition_dataset
+from mms_msg.sampling.source_composition import get_composition_dataset, sample_utterance_composition
 from mms_msg.simulation.anechoic import anechoic_scenario_map_fn
 from mms_msg.simulation.noise import white_microphone_noise
 from mms_msg.simulation.reverberant import reverberant_scenario_map_fn
@@ -18,6 +18,7 @@ class AnechoicMeetingDatabase(MMSMSGDatabase):
             meeting_sampler,
             scaling_sampler,
             snr_sampler,
+            composition_sampler=sample_utterance_composition,
             source_filter=None,
     ):
         super().__init__(source_database)
@@ -26,6 +27,7 @@ class AnechoicMeetingDatabase(MMSMSGDatabase):
         self.meeting_sampler = meeting_sampler
         self.scaling_sampler = scaling_sampler
         self.snr_sampler = snr_sampler
+        self.composition_sampler = composition_sampler
         if source_filter is None:
             def source_filter(_):
                 return True
@@ -37,6 +39,7 @@ class AnechoicMeetingDatabase(MMSMSGDatabase):
         ds = get_composition_dataset(
             input_dataset=input_ds,
             num_speakers=self.num_speakers,
+            composition_sampler=self.composition_sampler,
             rng=rng
         )
         ds = ds.map(self.scaling_sampler)
