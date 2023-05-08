@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Iterable
+import numpy as np
 
 from cached_property import cached_property
 
@@ -166,6 +167,143 @@ class _MeetingSampler:
         collated_example = pb.utils.nested.deflatten(flat_collated_example)
         return collated_example
 
+@dataclass
+class _MeetingSamplerUnique:
+    '''Copy from _MeetingSampler, uses all utterances of all speakers in one meeting'''
+    input_dataset: Iterable
+    overlap_sampler: OverlapSampler
+    scenario_sequence_sampler: callable = sample_balanced
+
+    def __post_init__(self):
+        if isinstance(self.scenario_sequence_sampler, str):
+            self.scenario_sequence_sampler = scenario_sequence_samplers[
+                self.scenario_sequence_sampler
+            ]
+
+    @cached_property
+    def normalized_dataset(self) -> Dataset:
+        return cache_and_normalize_input_dataset(self.input_dataset)
+
+    @cached_property
+    def scenario_grouped_dataset(self):
+        return self.normalized_dataset.groupby(lambda x: x['scenario'])
+
+    def __call__(self, example):
+        example_id = example['example_id']
+        all_examples = [
+            self.normalized_dataset[source_id]
+            for source_id in example['source_id']
+        ]
+        logger.debug(f'Generating meeting with example ID "{example_id}"')
+
+        # Sample stuff that is constant over the meeting
+        speaker_ids = [x['speaker_id'] for x in all_examples]
+        unique_speaker_ids = list(set(speaker_ids))
+        unique_speaker_ids.sort() 
+        speaker_sequence_rng = get_rng_example(example, 'speaker_sequence')
+
+        examples = []
+        # Add base examples to be sure that each speaker is active at least once
+        while (len(speaker_ids) > 0):
+            segment_idx = len(examples)
+            # Get the input example to add to the meeting. First, add each
+            # speaker once, then sample randomly according to the strategy
+            # defined by the scenario sampler and random choice
+            if segment_idx < len(unique_speaker_ids):
+                current_speaker = unique_speaker_ids[segment_idx]
+            else:
+                current_speaker = self.scenario_sequence_sampler(
+                        unique_speaker_ids, examples, speaker_sequence_rng
+                    )
+            idx_speaker = np.array([i for i, s in enumerate(speaker_ids) if s == current_speaker])
+            rng = get_rng_example(example, 'example', segment_idx)
+            idx_utterance = rng.choice(idx_speaker)
+            speaker_ids.pop(idx_utterance)
+            if len(idx_speaker) == 1:
+                # remove speaker from sampling list, if last utterance is used
+                unique_speaker_ids.remove(current_speaker)
+            current_source = all_examples.pop(idx_utterance)
+            logger.debug(f'Sampling utterance of speaker "{current_speaker}"')
+            
+            # Sample either overlap or silence duration
+            rng = get_rng_example(example, segment_idx, 'offset')
+            if len(examples) > 0:
+                offset = self.overlap_sampler(examples, current_source, rng)
+            else:
+                offset = 0
+            current_source[keys.OFFSET] = {keys.ORIGINAL_SOURCE: offset}
+
+            examples.append(current_source)
+
+        # Collate the examples and copy over / replicate things that are already
+        # present in the base full overlap example.
+        # Use the same format as SMS-WSJ.
+        # Heuristic: Replicate nothing that is in the collated
+        # example. For the rest, we have a white- and blacklist of keys that should
+        # or should not be replicated. Keys that are not replicated are copied from
+        # the input example to the output example.
+
+        replicate_whitelist = (
+            'log_weights',
+            'audio_path.rir',
+            'source_position',
+        )
+        replicate_blacklist = (
+            'sensor_positions',
+            'room_dimensions',
+            'example_id',
+            'num_speakers',
+            'source_dataset',
+            'sound_decay_time',
+            'sensor_position',
+            'snr',
+        )
+
+        # Collate
+        collated_examples = collate_fn(examples)
+
+        # Handle some special keys prior to replication
+        collated_examples['source_id'] = collated_examples.pop('example_id')
+        flat_example = pb.utils.nested.flatten(example)
+        speaker_ids = flat_example['speaker_id']
+        collated_examples['num_samples'] = {
+            'original_source': collated_examples['num_samples']['observation']
+        }
+        sources = collated_examples['audio_path'].pop('observation')
+        collated_examples['audio_path']['original_source'] = sources
+        collated_examples['source_dataset'] = collated_examples['dataset']
+        update_num_samples(collated_examples)
+        collated_examples['dataset'] = example['dataset']
+
+        # Copy and replicate
+        flat_collated_example = pb.utils.nested.flatten(collated_examples)
+        for key in flat_example.keys():
+            if key not in flat_collated_example:
+                if key in replicate_whitelist:
+                    if key == 'source_position':
+                        # Special case: nested lists
+                        assert len(flat_example[key][0]) == len(speaker_ids), (flat_example[key], speaker_ids)
+                        transposed = zip(*flat_example[key])
+                        m = dict(zip(speaker_ids, transposed))
+                        transposed = [m[s] for s in flat_collated_example['speaker_id']]
+                        flat_collated_example[key] = list(map(list, zip(*transposed)))
+                    else:
+                        assert len(flat_example[key]) == len(speaker_ids), (flat_example[key], speaker_ids)
+                        m = dict(zip(speaker_ids, flat_example[key]))
+                        flat_collated_example[key] = [m[s] for s in flat_collated_example['speaker_id']]
+                else:
+                    if key not in replicate_blacklist:
+                        # Add keys that you need to blacklist/whitelist
+                        raise RuntimeError(
+                            f'Key {key} not found in replicate_whitelist or '
+                            f'replicate_blacklist.\n'
+                            f'replicate whitelist={replicate_whitelist},\n'
+                            f'replicate whitelist={replicate_blacklist},\n'
+                        )
+                    flat_collated_example[key] = flat_example[key]
+        collated_example = pb.utils.nested.deflatten(flat_collated_example)
+        return collated_example
+
 
 def sample_meeting_from_full_overlap(
         example, input_dataset,
@@ -213,6 +351,7 @@ class MeetingSampler(pt.Configurable):
             maximum_overlap=8 * 8000,
         )
     )
+    sample_unique: bool = False
 
     def __call__(self, dataset: Dataset):
         """
@@ -226,9 +365,16 @@ class MeetingSampler(pt.Configurable):
          - vad (ArrayInterval or numpy array): VAD information, with sample
             resolution
         """
-        return _MeetingSampler(
-            input_dataset=dataset,
-            duration=self.duration,
-            scenario_sequence_sampler=self.scenario_sequence_sampler,
-            overlap_sampler=self.overlap_sampler,
-        )
+        if self.sample_unique:
+            return _MeetingSamplerUnique(
+                input_dataset=dataset,
+                scenario_sequence_sampler=self.scenario_sequence_sampler,
+                overlap_sampler=self.overlap_sampler,
+            )
+        else:
+            return _MeetingSampler(
+                input_dataset=dataset,
+                duration=self.duration,
+                scenario_sequence_sampler=self.scenario_sequence_sampler,
+                overlap_sampler=self.overlap_sampler,
+            )
