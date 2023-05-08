@@ -9,7 +9,6 @@ from mms_msg.sampling.utils import cache_and_normalize_input_dataset, collate_fn
 from mms_msg.sampling.utils.rng import get_rng, derive_rng
 from lazy_dataset import Dataset
 import numpy as np
-import random
 import logging
 
 logger = logging.getLogger('composition')
@@ -46,6 +45,7 @@ def sample_utterance_unique_composition(input_dataset, rng, num_speakers=(3,4)):
     """
     speaker_ids = [example['speaker_id'] for example in input_dataset]
     unique_speaker_ids = list(set(speaker_ids))
+    unique_speaker_ids.sort() 
 
     max_speakers = len(unique_speaker_ids)
 
@@ -54,10 +54,10 @@ def sample_utterance_unique_composition(input_dataset, rng, num_speakers=(3,4)):
     # and vctk_dev and vctk_test with each 30 speakers in total to 
     # 6 meetings with 3 speakers and 3 meetings with 4 speakers
     if max_speakers == 40:
-        speakers_per_composition = num_speakers[0] * np.ones(10, dtype=int) 
+        speakers_per_composition = num_speakers[0] * np.ones(12, dtype=int) 
         speakers_per_composition[:4] = num_speakers[1]
     elif max_speakers == 30:
-        speakers_per_composition = num_speakers[0] * np.ones(10, dtype=int)
+        speakers_per_composition = num_speakers[0] * np.ones(9, dtype=int)
         speakers_per_composition[:3] = num_speakers[1]
     else:
         raise KeyError(f'No settings defined for maximum of speakers {max_speakers}') from None
@@ -65,14 +65,15 @@ def sample_utterance_unique_composition(input_dataset, rng, num_speakers=(3,4)):
     # Generate list of spekears per meeting
     composition = []
     for speakers in speakers_per_composition:
-        current = random.sample(unique_speaker_ids, k=speakers)
+        unique_speaker_ids = list(rng.permutation(unique_speaker_ids))
+        current = unique_speaker_ids[:speakers]
         candidates = None
         for c in current:
             idx_c = np.array([i for i, s in enumerate(speaker_ids) if s == c])
             if candidates is None:
-                candidates = idx_c[:, None]
+                candidates = idx_c
             else:
-                candidates = np.concatenate([candidates, idx_c[:, None]], axis=0)
+                candidates = np.concatenate((candidates, idx_c))
             unique_speaker_ids.remove(c)
         composition.append(candidates)
     logger.debug(f'Generated {len(composition)} speaker '
@@ -224,6 +225,7 @@ def _composition_list_to_dict(
         composition: list,
         input_dataset: Dataset,
         dataset_name: str,
+        sample_unique: bool = False
 ) -> dict:
     """
     Helper function that builds examples from indices for the `input_dataset`.
@@ -257,10 +259,15 @@ def _composition_list_to_dict(
         }
 
         # Check that there are no duplicate speakers
-        assert pb.utils.misc.all_unique(example['speaker_id']), example['speaker_id']
+        if not sample_unique:
+            assert pb.utils.misc.all_unique(example['speaker_id']), example['speaker_id']
 
         # Build an example ID for each example
-        example_id = '_'.join([str(idx), *map(str, example['example_id'])])
+        if not sample_unique:
+            example_id = '_'.join([str(idx), *map(str, example['example_id'])])
+        else:
+            unique_speaker_ids = sorted(list(set(example['speaker_id'])))
+            example_id = '_'.join([str(idx), *map(str, unique_speaker_ids)])
         assert example_id not in base, (
             'Duplicate example IDs found! Modify the example ID generation '
             'code to avoid this!'
@@ -407,7 +414,7 @@ def get_unique_composition(
 
     # Convert the composition to the correct format
     composition = _composition_list_to_dict(
-        composition, input_dataset, name
+        composition, input_dataset, name, sample_unique=True
     )
     return composition
 
