@@ -30,7 +30,7 @@ for subset in dataset_names:
         for speaker_id, utt_id in zip(spkrs_list, utt_ids):
             if speaker_id in utterances_mix.keys():
                 if utt_id in utterances_mix[speaker_id].keys():
-                    assert(f"Duplicate! At {subset}, speaker {speaker_id}, utterance {utt_id}.")
+                    raise KeyError(f"Duplicate! At {subset}, speaker {speaker_id}, utterance {utt_id}.")
             utterances_mix[speaker_id][utt_id] = 1
     print(duration)
     total_dur += sum(duration)
@@ -42,7 +42,7 @@ for subset in dataset_names:
             utt_id, speaker_id = line.replace('\n', '').split(' ', maxsplit=1)
             if speaker_id in utterances_mix.keys():
                 if not utt_id in utterances_mix[speaker_id]:
-                    assert(f"Missing utterance! At {subset}, speaker {speaker_id}, utterance {utt_id}.")
+                    raise KeyError(f"Missing utterance! At {subset}, speaker {speaker_id}, utterance {utt_id}.")
             else:
-                assert(f"Missing speaker! At {subset}, speaker {speaker_id}.")
+                raise KeyError(f"Missing speaker! At {subset}, speaker {speaker_id}.")
 print(total_len, total_dur/60)
